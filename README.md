@@ -36,10 +36,11 @@ python fleet_monitor.py \
   --avg-speed-kmh 50 \
   --buffer-hours 2 \
   --max-same-day-distance-km 1000 \
-  [--skip-missing]
+  [--skip-missing] \
+  [--output report.csv]
 ```
 
-Die Ausgabe ist eine kleine CSV-Tabelle mit Distanz, benötigter Fahrzeit, verbleibender Zeit bis zur Buchung und einer Ja/Nein-Aussage (`can_reach`) plus einem Status-Feld (`reachable`, `tight`, `unreachable`, `missing_location`). Mit `--skip-missing` können Buchungen ohne aktuelle Fahrzeugposition unterdrückt werden, andernfalls erscheinen sie als `missing_location` mit unerreichbar-Markierung.
+Die Ausgabe ist eine kleine CSV-Tabelle mit Distanz, benötigter Fahrzeit, verbleibender Zeit bis zur Buchung und einer Ja/Nein-Aussage (`can_reach`) plus einem Status-Feld (`reachable`, `tight`, `unreachable`, `missing_location`). Mit `--skip-missing` können Buchungen ohne aktuelle Fahrzeugposition unterdrückt werden, andernfalls erscheinen sie als `missing_location` mit unerreichbar-Markierung. Mit `--output` kannst du den Report direkt als Datei ablegen (inkl. automatischer Ordnererstellung), ohne Shell-Umleitung zu nutzen.
 
 ### Beispiel mit den beigefügten CSVs
 Im Ordner `examples/` liegen kleine Testdateien ohne externe Abhängigkeiten (nur die Python-Standardbibliothek wird benötigt). Du kannst das Tool damit direkt ausprobieren:
@@ -49,10 +50,11 @@ python fleet_monitor.py \
   --locations examples/locations_sample.csv \
   --stations examples/stations_sample.csv \
   --bookings examples/bookings_sample.csv \
-  --avg-speed-kmh 50
+  --avg-speed-kmh 50 \
+  --output /tmp/ergebnis.csv
 ```
 
-Die Ausgabe erscheint auf STDOUT; bei Bedarf kannst du sie in eine Datei umleiten:
+Die Ausgabe erscheint weiterhin auf STDOUT; bei Bedarf kannst du sie in eine Datei umleiten oder `--output` nutzen:
 
 ```bash
 python fleet_monitor.py ... > ergebnis.csv

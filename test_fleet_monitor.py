@@ -14,6 +14,7 @@ from fleet_monitor import (
     load_latest_locations,
     load_stations,
     parse_iso_datetime,
+    write_report,
 )
 
 
@@ -147,6 +148,14 @@ class TestFleetMonitor(unittest.TestCase):
             self.assertEqual(loaded_stations["S1"].name, "Ost")
             self.assertEqual(loaded_locations["V1"].vin, "V1")
             self.assertEqual(loaded_bookings[0].station_id, "S1")
+
+    def test_write_report_creates_file(self) -> None:
+        report = "header\nrow"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "out" / "report.csv"
+            write_report(report, path)
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_text(), report + "\n")
 
 
 if __name__ == "__main__":

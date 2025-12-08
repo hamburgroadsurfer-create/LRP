@@ -236,6 +236,11 @@ def format_report(assessments: Sequence[BookingAssessment]) -> str:
     return "\n".join(lines)
 
 
+def write_report(report: str, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(report + "\n", encoding="utf-8")
+
+
 def run_report(
     locations_path: Path,
     stations_path: Path,
@@ -296,6 +301,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Buchungen ohne aktuelle Fahrzeugposition nicht listen",
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Dateipfad fuer den CSV-Report; wenn nicht gesetzt, wird nur auf STDOUT gedruckt",
+    )
     return parser.parse_args(argv)
 
 
@@ -310,6 +320,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         max_same_day_distance_km=args.max_same_day_distance_km,
         include_missing=not args.skip_missing,
     )
+    if args.output:
+        write_report(report, args.output)
     print(report)
 
 

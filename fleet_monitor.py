@@ -221,8 +221,17 @@ def format_report(assessments: Sequence[BookingAssessment]) -> str:
     ]
     for item in assessments:
         lines.append(
-            f"{item.vin},{item.station_name} ({item.station_id}),"
-            f"{item.distance_km:.2f},{item.travel_hours:.2f},{item.hours_until_booking:.2f},{item.can_reach},{item.status}"
+            ",".join(
+                [
+                    item.vin,
+                    f"{item.station_name} ({item.station_id})",
+                    f"{item.distance_km:.2f}",
+                    f"{item.travel_hours:.2f}",
+                    f"{item.hours_until_booking:.2f}",
+                    str(item.can_reach),
+                    item.status,
+                ]
+            )
         )
     return "\n".join(lines)
 

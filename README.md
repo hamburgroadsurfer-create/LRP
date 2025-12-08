@@ -69,3 +69,22 @@ python fleet_monitor.py ... > ergebnis.csv
 ```bash
 python -m unittest
 ```
+
+## Code nach GitHub spiegeln
+Falls du das Projekt in ein eigenes GitHub-Repository hochladen möchtest, genügen die Git-Bordmittel:
+
+1. Neues (leeres) Repository auf GitHub anlegen und die HTTPS- oder SSH-URL kopieren.
+2. Remote setzen (ersetze `YOUR_URL`):
+
+   ```bash
+   git remote remove origin 2>/dev/null || true
+   git remote add origin YOUR_URL
+   ```
+
+3. Ersten Push durchführen (inklusive Branch-Namen, z. B. `main`):
+
+   ```bash
+   git push -u origin main
+   ```
+
+Bei späteren Änderungen reicht dann `git push`. Falls Authentifizierung per PAT nötig ist, kannst du den Token anstelle des Passworts verwenden.

@@ -19,7 +19,9 @@ This repository provides two ways to rate daily vehicle returns using VINs, stat
 
 ## Browser usage (works without Python)
 
-1. Open `return_report_web.html` in any modern browser (double-click the file or drag it into a tab).
+If your laptop blocks Python or installation of tools, use the browser workflow. Nothing needs to be installed.
+
+1. Open `return_report_web.html` in any modern browser (double-click the file or drag it into a tab). On Windows you can also double-click `return_report_web.bat`, which opens the HTML for you.
 2. Select the three daily files:
    - `Bookings_Return_Today.csv` (VIN + return station)
    - `StationsNew.CSV` (station names with latitude/longitude)

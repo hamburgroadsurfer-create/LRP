@@ -4,6 +4,7 @@ This repository provides two ways to rate daily vehicle returns using VINs, stat
 
 1. **Browser tool (no Installation/Admin rights needed):** open `return_report_web.html` locally and drop the three daily files. All parsing and distance math run client-side in JavaScript.
 2. **Python CLI:** `return_report.py` (dependency-free) if Python is available.
+This repository provides a lightweight CLI to rate daily vehicle returns using VINs, station coordinates, and GNSS positions.
 
 ## How it works
 - `return_report.py` reads the three daily files:
@@ -32,6 +33,7 @@ If your laptop blocks Python or installation of tools, use the browser workflow.
 All processing happens in the browser; no files leave your machine and no admin rights are required.
 
 ## Python CLI usage
+## Usage
 ```bash
 python return_report.py \
   --bookings Bookings_Return_Today.csv \

@@ -21,6 +21,7 @@
     button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; background: #f4f4f4; }
     button.primary { background: #0b6efd; color: white; border-color: #0b6efd; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    select, input[type="number"] { padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #888; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.95rem; }
     th, td { padding: 0.5rem; border: 1px solid #ddd; text-align: left; }
     th { background: rgba(0,0,0,0.05); }
@@ -31,6 +32,10 @@
     .unknown { background: #6c757d; }
     .muted { color: #666; font-size: 0.9rem; }
     .error { color: #dc3545; font-weight: 600; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin: 1rem 0 0.5rem; }
+    .summary-card { padding: 0.75rem 0.9rem; border: 1px solid #ccc; border-radius: 8px; background: rgba(0,0,0,0.02); }
+    .summary-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+    .summary-value { font-size: 1.4rem; margin-top: 0.35rem; }
   </style>
 </head>
 <body>
@@ -73,6 +78,17 @@
 
   <section>
     <h2>Ergebnis</h2>
+    <div class="controls" style="margin-bottom: 0.5rem;">
+      <label for="statusFilter" style="margin: 0;">Filter</label>
+      <select id="statusFilter">
+        <option value="all">Alle Status</option>
+        <option value="green">Nur grün</option>
+        <option value="yellow">Nur gelb</option>
+        <option value="red">Nur rot</option>
+        <option value="unknown">Keine Positionsdaten</option>
+      </select>
+    </div>
+    <div id="summary" class="summary-grid muted">Noch keine Daten vorhanden.</div>
     <div id="errorBox" class="error" style="display:none"></div>
     <div id="tableHost" class="muted">Bitte Dateien wählen und "Ampel berechnen" klicken.</div>
   </section>
@@ -86,6 +102,8 @@
   const statusMsg = document.getElementById('statusMsg');
   const tableHost = document.getElementById('tableHost');
   const errorBox = document.getElementById('errorBox');
+  const summary = document.getElementById('summary');
+  const statusFilter = document.getElementById('statusFilter');
 
   let lastReport = [];
 
@@ -137,12 +155,15 @@
   }
 
   function renderTable(rows) {
-    if (!rows.length) {
-      tableHost.innerHTML = '<div class="muted">Keine Daten berechnet.</div>';
+    const filtered = filterRows(rows);
+    if (!filtered.length) {
+      tableHost.innerHTML = rows.length
+        ? '<div class="muted">Keine Einträge für den aktuellen Filter.</div>'
+        : '<div class="muted">Keine Daten berechnet.</div>';
       return;
     }
     const html = [`<table><thead><tr><th>Status</th><th>VIN</th><th>Station</th><th>Distanz</th><th>Aktuelle Position</th><th>Rückgabedatum</th></tr></thead><tbody>`];
-    rows.forEach((row) => {
+    filtered.forEach((row) => {
       html.push(`<tr>
         <td><span class="status ${row.status}">${row.status.toUpperCase()}</span></td>
         <td>${row.vin || ''}</td>
@@ -154,6 +175,44 @@
     });
     html.push('</tbody></table>');
     tableHost.innerHTML = html.join('');
+  }
+
+  function renderSummary(rows) {
+    if (!rows.length) {
+      summary.innerHTML = '<div class="muted">Noch keine Daten vorhanden.</div>';
+      return;
+    }
+
+    const counts = rows.reduce(
+      (acc, row) => {
+        acc[row.status] = (acc[row.status] || 0) + 1;
+        acc.total += 1;
+        return acc;
+      },
+      { total: 0 }
+    );
+
+    const statusOrder = [
+      { key: 'green', label: 'grün', className: 'green' },
+      { key: 'yellow', label: 'gelb', className: 'yellow' },
+      { key: 'red', label: 'rot', className: 'red' },
+      { key: 'unknown', label: 'keine Position', className: 'unknown' },
+    ];
+
+    const cards = [`<div class="summary-card"><div class="summary-title">Gesamt</div><div class="summary-value">${counts.total}</div></div>`];
+    statusOrder.forEach(({ key, label, className }) => {
+      const value = counts[key] || 0;
+      cards.push(
+        `<div class="summary-card"><div class="summary-title"><span class="status ${className}">${label.toUpperCase()}</span></div><div class="summary-value">${value}</div></div>`
+      );
+    });
+
+    summary.innerHTML = cards.join('');
+  }
+
+  function filterRows(rows) {
+    if (statusFilter.value === 'all') return rows;
+    return rows.filter((row) => row.status === statusFilter.value);
   }
 
   function downloadCsv(rows) {
@@ -254,6 +313,7 @@
       });
 
       lastReport = results;
+      renderSummary(results);
       renderTable(results);
       downloadBtn.disabled = !results.length;
       statusMsg.textContent = `Fertig: ${results.length} Fahrzeuge ausgewertet.`;
@@ -269,6 +329,9 @@
   generateBtn.addEventListener('click', generateReport);
   downloadBtn.addEventListener('click', () => {
     if (lastReport.length) downloadCsv(lastReport);
+  });
+  statusFilter.addEventListener('change', () => {
+    renderTable(lastReport);
   });
 </script>
 </body>

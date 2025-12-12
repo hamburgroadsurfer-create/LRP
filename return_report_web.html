@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Return Feasibility (Client-side)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    body { margin: 1.25rem auto; padding: 0 1rem; max-width: 1100px; }
+    h1 { margin-bottom: 0; }
+    p.lead { margin-top: 0.25rem; color: #666; }
+    section { margin: 1.5rem 0; padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background: rgba(0,0,0,0.02); }
+    label { display: block; font-weight: 600; margin-bottom: 0.4rem; }
+    input[type="file"] { margin-bottom: 0.8rem; }
+    .row { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); align-items: center; }
+    .controls { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; background: #f4f4f4; }
+    button.primary { background: #0b6efd; color: white; border-color: #0b6efd; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.95rem; }
+    th, td { padding: 0.5rem; border: 1px solid #ddd; text-align: left; }
+    th { background: rgba(0,0,0,0.05); }
+    .status { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; font-weight: 700; color: white; }
+    .green { background: #198754; }
+    .yellow { background: #ffc107; color: #111; }
+    .red { background: #dc3545; }
+    .unknown { background: #6c757d; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .error { color: #dc3545; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Return Feasibility (No Python required)</h1>
+  <p class="lead">Alle Dateien werden im Browser verarbeitet. Keine Installation, keine Admin-Rechte.</p>
+
+  <section>
+    <div class="row">
+      <div>
+        <label for="bookingFile">Booking Return CSV (Airtable)</label>
+        <input id="bookingFile" type="file" accept=".csv" />
+        <div class="muted">Erwartete Spalten: VIN/vehicle_id, station, Booking Return Date.</div>
+      </div>
+      <div>
+        <label for="stationFile">Stations CSV</label>
+        <input id="stationFile" type="file" accept=".csv" />
+        <div class="muted">Spalten: Station_Master oder Station_Fix, Latitude, Longitude.</div>
+      </div>
+      <div>
+        <label for="gnssFile">GNSS Export (Power BI, CSV)</label>
+        <input id="gnssFile" type="file" accept=".csv" />
+        <div class="muted">Spalten: VIN, GNSS Latitude, GNSS Longitude. Bitte als CSV exportieren.</div>
+      </div>
+    </div>
+
+    <div class="controls" style="margin-top: 1rem;">
+      <div>
+        <label for="greenThreshold">Grün bis (km)</label>
+        <input id="greenThreshold" type="number" value="200" min="1" max="2000" />
+      </div>
+      <div>
+        <label for="yellowThreshold">Gelb bis (km)</label>
+        <input id="yellowThreshold" type="number" value="1000" min="1" max="5000" />
+      </div>
+      <button id="generateBtn" class="primary">Ampel berechnen</button>
+      <button id="downloadBtn" disabled>CSV herunterladen</button>
+      <span id="statusMsg" class="muted"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ergebnis</h2>
+    <div id="errorBox" class="error" style="display:none"></div>
+    <div id="tableHost" class="muted">Bitte Dateien wählen und "Ampel berechnen" klicken.</div>
+  </section>
+
+<script>
+  const bookingInput = document.getElementById('bookingFile');
+  const stationInput = document.getElementById('stationFile');
+  const gnssInput = document.getElementById('gnssFile');
+  const generateBtn = document.getElementById('generateBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const statusMsg = document.getElementById('statusMsg');
+  const tableHost = document.getElementById('tableHost');
+  const errorBox = document.getElementById('errorBox');
+
+  let lastReport = [];
+
+  function normalizeKey(key) {
+    return key.replace(/\ufeff/g, '').trim().toLowerCase();
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let current = '';
+    let inQuotes = false;
+    const pushCell = () => {
+      rows[rows.length - 1].push(current);
+      current = '';
+    };
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const next = text[i + 1];
+      if (!rows.length) rows.push([]);
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          current += '"';
+          i++; // skip escaped quote
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        pushCell();
+      } else if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') i++; // handle CRLF
+        pushCell();
+        rows.push([]);
+      } else {
+        current += char;
+      }
+    }
+    if (rows.length && (current.length || rows[rows.length - 1].length)) {
+      pushCell();
+    }
+    // trim potential empty row at end
+    while (rows.length && rows[rows.length - 1].every((c) => c === '')) rows.pop();
+    return rows;
+  }
+
+  function csvToObjects(text) {
+    const rows = parseCsv(text);
+    if (!rows.length) return [];
+    const headers = rows[0].map(normalizeKey);
+    return rows.slice(1).map((row) => {
+      const obj = {};
+      headers.forEach((key, idx) => {
+        obj[key] = (row[idx] ?? '').toString();
+      });
+      return obj;
+    });
+  }
+
+  function parseNumber(value) {
+    if (typeof value === 'number') return value;
+    if (!value) return NaN;
+    const normalized = value.toString().replace(',', '.');
+    return parseFloat(normalized);
+  }
+
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const toRad = (v) => (v * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function classify(distance, thresholds) {
+    if (distance == null || Number.isNaN(distance)) {
+      return { status: 'unknown', label: 'keine Positionsdaten' };
+    }
+    if (distance <= thresholds.green) return { status: 'green', label: `${distance.toFixed(1)} km` };
+    if (distance <= thresholds.yellow) return { status: 'yellow', label: `${distance.toFixed(1)} km` };
+    return { status: 'red', label: `${distance.toFixed(1)} km` };
+  }
+
+  function renderTable(rows) {
+    if (!rows.length) {
+      tableHost.innerHTML = '<div class="muted">Keine Daten berechnet.</div>';
+      return;
+    }
+    const html = [`<table><thead><tr><th>Status</th><th>VIN</th><th>Station</th><th>Distanz</th><th>Aktuelle Position</th><th>Rückgabedatum</th></tr></thead><tbody>`];
+    rows.forEach((row) => {
+      html.push(`<tr>
+        <td><span class="status ${row.status}">${row.status.toUpperCase()}</span></td>
+        <td>${row.vin || ''}</td>
+        <td>${row.station || ''}</td>
+        <td>${row.distanceLabel}</td>
+        <td>${row.location || ''}</td>
+        <td>${row.returnDate || ''}</td>
+      </tr>`);
+    });
+    html.push('</tbody></table>');
+    tableHost.innerHTML = html.join('');
+  }
+
+  function downloadCsv(rows) {
+    const header = ['status', 'vin', 'station', 'distance_km', 'location_lat', 'location_lon', 'return_date'];
+    const lines = [header.join(',')];
+    rows.forEach((r) => {
+      lines.push([
+        r.status,
+        r.vin ?? '',
+        r.station ?? '',
+        r.distanceKm ?? '',
+        r.lat ?? '',
+        r.lon ?? '',
+        r.returnDate ?? '',
+      ].join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'return_report.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function pickStationName(row) {
+    return row['station_master'] || row['station_fix'] || row['station'] || '';
+  }
+
+  async function readCsvFile(input) {
+    const file = input.files[0];
+    if (!file) throw new Error('Datei fehlt: ' + input.id);
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      throw new Error(`${file.name} ist kein CSV. Bitte den Export als CSV speichern.`);
+    }
+    const text = await file.text();
+    return csvToObjects(text);
+  }
+
+  async function generateReport() {
+    errorBox.style.display = 'none';
+    statusMsg.textContent = 'Lade Dateien…';
+    downloadBtn.disabled = true;
+    try {
+      const [bookingRows, stationRows, gnssRows] = await Promise.all([
+        readCsvFile(bookingInput),
+        readCsvFile(stationInput),
+        readCsvFile(gnssInput),
+      ]);
+
+      const stationMap = new Map();
+      stationRows.forEach((row) => {
+        const name = pickStationName(row).trim();
+        const lat = parseNumber(row['latitude']);
+        const lon = parseNumber(row['longitude']);
+        if (!name || Number.isNaN(lat) || Number.isNaN(lon)) return;
+        stationMap.set(name.toLowerCase(), { name, lat, lon });
+      });
+
+      const latestGnss = new Map();
+      gnssRows.forEach((row) => {
+        const vin = (row['vin'] || row['vehicle_id'] || '').trim();
+        const lat = parseNumber(row['gnss latitude'] || row['latitude'] || row['lat']);
+        const lon = parseNumber(row['gnss longitude'] || row['longitude'] || row['lon']);
+        if (!vin || Number.isNaN(lat) || Number.isNaN(lon)) return;
+        latestGnss.set(vin, { lat, lon });
+      });
+
+      const thresholds = {
+        green: Math.max(1, Number(document.getElementById('greenThreshold').value) || 200),
+        yellow: Math.max(1, Number(document.getElementById('yellowThreshold').value) || 1000),
+      };
+      if (thresholds.yellow < thresholds.green) thresholds.yellow = thresholds.green;
+
+      const results = bookingRows.map((row) => {
+        const vin = (row['vehicle_id'] || row['vin'] || '').trim();
+        const stationName = (row['station'] || row['return'] || '').trim();
+        const returnDate = row['booking return date'] || row['return date'] || row['date'] || '';
+        const station = stationMap.get(stationName.toLowerCase());
+        const gnss = latestGnss.get(vin);
+        let distance = null;
+        if (station && gnss) {
+          distance = haversineKm(station.lat, station.lon, gnss.lat, gnss.lon);
+        }
+        const classification = classify(distance, thresholds);
+        return {
+          status: classification.status,
+          vin,
+          station: stationName,
+          distanceKm: distance != null && !Number.isNaN(distance) ? distance.toFixed(2) : '',
+          distanceLabel: classification.label,
+          lat: gnss?.lat ?? '',
+          lon: gnss?.lon ?? '',
+          location: gnss ? `${gnss.lat.toFixed(5)}, ${gnss.lon.toFixed(5)}` : '–',
+          returnDate,
+        };
+      });
+
+      lastReport = results;
+      renderTable(results);
+      downloadBtn.disabled = !results.length;
+      statusMsg.textContent = `Fertig: ${results.length} Fahrzeuge ausgewertet.`;
+    } catch (err) {
+      console.error(err);
+      errorBox.textContent = err.message;
+      errorBox.style.display = 'block';
+      tableHost.innerHTML = '<div class="muted">Fehler beim Verarbeiten.</div>';
+      statusMsg.textContent = '';
+    }
+  }
+
+  generateBtn.addEventListener('click', generateReport);
+  downloadBtn.addEventListener('click', () => {
+    if (lastReport.length) downloadCsv(lastReport);
+  });
+</script>
+</body>
+</html>

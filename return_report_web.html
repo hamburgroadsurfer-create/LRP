@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Return Feasibility (Client-side)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -49,9 +50,9 @@
         <div class="muted">Spalten: Station_Master oder Station_Fix, Latitude, Longitude.</div>
       </div>
       <div>
-        <label for="gnssFile">GNSS Export (Power BI, CSV)</label>
-        <input id="gnssFile" type="file" accept=".csv" />
-        <div class="muted">Spalten: VIN, GNSS Latitude, GNSS Longitude. Bitte als CSV exportieren.</div>
+        <label for="gnssFile">GNSS Export (Power BI, CSV oder XLSX)</label>
+        <input id="gnssFile" type="file" accept=".xlsx,.csv" />
+        <div class="muted">Spalten: VIN, GNSS Latitude, GNSS Longitude.</div>
       </div>
     </div>
 
@@ -92,45 +93,9 @@
     return key.replace(/\ufeff/g, '').trim().toLowerCase();
   }
 
-  function parseCsv(text) {
-    const rows = [];
-    let current = '';
-    let inQuotes = false;
-    const pushCell = () => {
-      rows[rows.length - 1].push(current);
-      current = '';
-    };
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      const next = text[i + 1];
-      if (!rows.length) rows.push([]);
-      if (char === '"') {
-        if (inQuotes && next === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        pushCell();
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (char === '\r' && next === '\n') i++; // handle CRLF
-        pushCell();
-        rows.push([]);
-      } else {
-        current += char;
-      }
-    }
-    if (rows.length && (current.length || rows[rows.length - 1].length)) {
-      pushCell();
-    }
-    // trim potential empty row at end
-    while (rows.length && rows[rows.length - 1].every((c) => c === '')) rows.pop();
-    return rows;
-  }
-
-  function csvToObjects(text) {
-    const rows = parseCsv(text);
+  function sheetToJson(workbook) {
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (!rows.length) return [];
     const headers = rows[0].map(normalizeKey);
     return rows.slice(1).map((row) => {
@@ -140,20 +105,6 @@
       });
       return obj;
     });
-  }
-
-  function normalizeLookupKey(key) {
-    return normalizeKey(key).replace(/[^a-z0-9]/gi, '');
-  }
-
-  function pick(row, aliases) {
-    const lookup = new Map();
-    Object.keys(row).forEach((k) => lookup.set(normalizeLookupKey(k), row[k]));
-    for (const alias of aliases) {
-      const hit = lookup.get(normalizeLookupKey(alias));
-      if (hit !== undefined && hit !== '') return hit;
-    }
-    return '';
   }
 
   function parseNumber(value) {
@@ -183,24 +134,6 @@
     if (distance <= thresholds.green) return { status: 'green', label: `${distance.toFixed(1)} km` };
     if (distance <= thresholds.yellow) return { status: 'yellow', label: `${distance.toFixed(1)} km` };
     return { status: 'red', label: `${distance.toFixed(1)} km` };
-  }
-
-  function excelSerialToDate(value) {
-    const serial = Number(value);
-    if (!Number.isFinite(serial)) return '';
-    const origin = new Date(Date.UTC(1899, 11, 30));
-    origin.setUTCDate(origin.getUTCDate() + Math.floor(serial));
-    return origin.toISOString().slice(0, 10);
-  }
-
-  function formatReturnDate(value) {
-    if (value == null) return '';
-    const raw = value.toString().trim();
-    if (!raw) return '';
-    if (/^\d{5}(?:\.\d+)?$/.test(raw)) {
-      return excelSerialToDate(raw);
-    }
-    return raw;
   }
 
   function renderTable(rows) {
@@ -250,14 +183,11 @@
     return row['station_master'] || row['station_fix'] || row['station'] || '';
   }
 
-  async function readCsvFile(input) {
+  async function readFile(input) {
     const file = input.files[0];
     if (!file) throw new Error('Datei fehlt: ' + input.id);
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      throw new Error(`${file.name} ist kein CSV. Bitte den Export als CSV speichern.`);
-    }
-    const text = await file.text();
-    return csvToObjects(text);
+    const buffer = await file.arrayBuffer();
+    return XLSX.read(buffer, { type: 'array' });
   }
 
   async function generateReport() {
@@ -265,26 +195,30 @@
     statusMsg.textContent = 'Lade Dateien…';
     downloadBtn.disabled = true;
     try {
-      const [bookingRows, stationRows, gnssRows] = await Promise.all([
-        readCsvFile(bookingInput),
-        readCsvFile(stationInput),
-        readCsvFile(gnssInput),
+      const [bookingWb, stationWb, gnssWb] = await Promise.all([
+        readFile(bookingInput),
+        readFile(stationInput),
+        readFile(gnssInput),
       ]);
+
+      const bookingRows = sheetToJson(bookingWb);
+      const stationRows = sheetToJson(stationWb);
+      const gnssRows = sheetToJson(gnssWb);
 
       const stationMap = new Map();
       stationRows.forEach((row) => {
         const name = pickStationName(row).trim();
-        const lat = parseNumber(pick(row, ['latitude', 'lat']));
-        const lon = parseNumber(pick(row, ['longitude', 'lon', 'lng']));
+        const lat = parseNumber(row['latitude']);
+        const lon = parseNumber(row['longitude']);
         if (!name || Number.isNaN(lat) || Number.isNaN(lon)) return;
         stationMap.set(name.toLowerCase(), { name, lat, lon });
       });
 
       const latestGnss = new Map();
       gnssRows.forEach((row) => {
-        const vin = (pick(row, ['vin', 'vehicle_id']) || '').trim();
-        const lat = parseNumber(pick(row, ['gnss latitude', 'gnss_latitude', 'latitude', 'lat']));
-        const lon = parseNumber(pick(row, ['gnss longitude', 'gnss_longitude', 'longitude', 'lon']));
+        const vin = (row['vin'] || row['vehicle_id'] || '').trim();
+        const lat = parseNumber(row['gnss latitude'] || row['latitude'] || row['lat']);
+        const lon = parseNumber(row['gnss longitude'] || row['longitude'] || row['lon']);
         if (!vin || Number.isNaN(lat) || Number.isNaN(lon)) return;
         latestGnss.set(vin, { lat, lon });
       });
@@ -296,10 +230,9 @@
       if (thresholds.yellow < thresholds.green) thresholds.yellow = thresholds.green;
 
       const results = bookingRows.map((row) => {
-        const vin = (pick(row, ['vehicle_id', 'vin']) || '').trim();
-        const stationName = (pick(row, ['station', 'return']) || '').trim();
-        const rawReturnDate = pick(row, ['booking return date', 'return date', 'date']);
-        const returnDate = formatReturnDate(rawReturnDate);
+        const vin = (row['vehicle_id'] || row['vin'] || '').trim();
+        const stationName = (row['station'] || row['return'] || '').trim();
+        const returnDate = row['booking return date'] || row['return date'] || row['date'] || '';
         const station = stationMap.get(stationName.toLowerCase());
         const gnss = latestGnss.get(vin);
         let distance = null;

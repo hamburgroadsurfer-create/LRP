@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Return Feasibility (Client-side)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -49,9 +50,9 @@
         <div class="muted">Spalten: Station_Master oder Station_Fix, Latitude, Longitude.</div>
       </div>
       <div>
-        <label for="gnssFile">GNSS Export (Power BI, CSV)</label>
-        <input id="gnssFile" type="file" accept=".csv" />
-        <div class="muted">Spalten: VIN, GNSS Latitude, GNSS Longitude. Bitte als CSV exportieren.</div>
+        <label for="gnssFile">GNSS Export (Power BI, CSV oder XLSX)</label>
+        <input id="gnssFile" type="file" accept=".xlsx,.csv" />
+        <div class="muted">Spalten: VIN, GNSS Latitude, GNSS Longitude.</div>
       </div>
     </div>
 
@@ -92,45 +93,9 @@
     return key.replace(/\ufeff/g, '').trim().toLowerCase();
   }
 
-  function parseCsv(text) {
-    const rows = [];
-    let current = '';
-    let inQuotes = false;
-    const pushCell = () => {
-      rows[rows.length - 1].push(current);
-      current = '';
-    };
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      const next = text[i + 1];
-      if (!rows.length) rows.push([]);
-      if (char === '"') {
-        if (inQuotes && next === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        pushCell();
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (char === '\r' && next === '\n') i++; // handle CRLF
-        pushCell();
-        rows.push([]);
-      } else {
-        current += char;
-      }
-    }
-    if (rows.length && (current.length || rows[rows.length - 1].length)) {
-      pushCell();
-    }
-    // trim potential empty row at end
-    while (rows.length && rows[rows.length - 1].every((c) => c === '')) rows.pop();
-    return rows;
-  }
-
-  function csvToObjects(text) {
-    const rows = parseCsv(text);
+  function sheetToJson(workbook) {
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (!rows.length) return [];
     const headers = rows[0].map(normalizeKey);
     return rows.slice(1).map((row) => {
@@ -218,14 +183,11 @@
     return row['station_master'] || row['station_fix'] || row['station'] || '';
   }
 
-  async function readCsvFile(input) {
+  async function readFile(input) {
     const file = input.files[0];
     if (!file) throw new Error('Datei fehlt: ' + input.id);
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      throw new Error(`${file.name} ist kein CSV. Bitte den Export als CSV speichern.`);
-    }
-    const text = await file.text();
-    return csvToObjects(text);
+    const buffer = await file.arrayBuffer();
+    return XLSX.read(buffer, { type: 'array' });
   }
 
   async function generateReport() {
@@ -233,11 +195,15 @@
     statusMsg.textContent = 'Lade Dateien…';
     downloadBtn.disabled = true;
     try {
-      const [bookingRows, stationRows, gnssRows] = await Promise.all([
-        readCsvFile(bookingInput),
-        readCsvFile(stationInput),
-        readCsvFile(gnssInput),
+      const [bookingWb, stationWb, gnssWb] = await Promise.all([
+        readFile(bookingInput),
+        readFile(stationInput),
+        readFile(gnssInput),
       ]);
+
+      const bookingRows = sheetToJson(bookingWb);
+      const stationRows = sheetToJson(stationWb);
+      const gnssRows = sheetToJson(gnssWb);
 
       const stationMap = new Map();
       stationRows.forEach((row) => {
